@@ -36,10 +36,10 @@ pub const HARDWARE_ID: &str = "tap0901";
 ///     .or_else(|_| -> std::io::Result<_> {
 ///         // The device does not exists...
 ///         // try creating a new one
-///         
+///
 ///         let dev = Device::create(HARDWARE_ID)?;
 ///         dev.set_name(MY_INTERFACE)?;
-///     
+///
 ///         Ok(dev)
 ///     })
 ///     // Everything failed, just panic
@@ -227,6 +227,14 @@ impl Device {
         let status: u32 = if status { 1 } else { 0 };
         let mut out_status: u32 = 0;
         ffi::device_io_control(self.handle, TAP_IOCTL_SET_MEDIA_STATUS, &status, &mut out_status)
+    }
+
+    pub fn read_non_mut(&self, buf: &mut [u8]) -> io::Result<usize> {
+        ffi::read_file(self.handle, buf).map(|res| res as _)
+    }
+
+    pub fn write_non_mut(&self, buf: &[u8]) -> io::Result<usize> {
+        ffi::write_file(self.handle, buf).map(|res| res as _)
     }
 }
 

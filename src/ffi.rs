@@ -3,7 +3,7 @@
 
 //! Module holding safe wrappers over winapi functions
 
-use std::{ffi::c_void, io, mem, ptr};
+use std::{ffi::c_void, fmt::Error, io, mem, ptr};
 use windows::{
     core::{GUID, HRESULT, PCWSTR},
     Win32::{
@@ -17,8 +17,8 @@ use windows::{
             SP_DEVINFO_DATA, SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
         },
         Foundation::{
-            CloseHandle, GetLastError, BOOL, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_ITEMS, FALSE, FILETIME, HANDLE,
-            HWND, TRUE, WAIT_EVENT, WAIT_OBJECT_0, WAIT_TIMEOUT, WIN32_ERROR,
+            CloseHandle, GetLastError, BOOL, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_NO_MORE_ITEMS, FALSE,
+            FILETIME, HANDLE, HWND, TRUE, WAIT_EVENT, WAIT_OBJECT_0, WAIT_TIMEOUT, WIN32_ERROR,
         },
         NetworkManagement::{
             IpHelper::{
@@ -34,7 +34,7 @@ use windows::{
             Com::StringFromGUID2,
             Registry::{RegNotifyChangeKeyValue, HKEY, REG_NOTIFY_FILTER},
             Threading::{CreateEventW, WaitForSingleObject},
-            IO::DeviceIoControl,
+            IO::{DeviceIoControl, GetOverlappedResult, OVERLAPPED},
         },
     },
 };
@@ -141,16 +141,24 @@ pub fn create_file(
 
 pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
     let mut ret = 0;
-    unsafe {
-        ReadFile(handle, Some(buffer), Some(&mut ret), None)?;
+    let mut overlapped = OVERLAPPED::default();
+    if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+        if error != ERROR_IO_PENDING.into() {
+            return Err(error.into());
+        }
+        unsafe { GetOverlappedResult(handle, &mut overlapped, &mut ret, true) }?;
     }
     Ok(ret as _)
 }
 
 pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
     let mut ret = 0;
-    unsafe {
-        WriteFile(handle, Some(buffer), Some(&mut ret), None)?;
+    let mut overlapped = OVERLAPPED::default();
+    if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+        if error != ERROR_IO_PENDING.into() {
+            return Err(error.into());
+        }
+        unsafe { GetOverlappedResult(handle, &mut overlapped, &mut ret, true) }?;
     }
     Ok(ret as _)
 }

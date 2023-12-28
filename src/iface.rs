@@ -10,7 +10,9 @@ use windows::{
         },
         Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE},
         NetworkManagement::Ndis::NET_LUID_LH,
-        Storage::FileSystem::{FILE_ATTRIBUTE_SYSTEM, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING},
+        Storage::FileSystem::{
+            FILE_ATTRIBUTE_SYSTEM, FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        },
         System::Registry::{HKEY, KEY_NOTIFY, KEY_QUERY_VALUE, REG_NOTIFY_CHANGE_NAME},
     },
 };
@@ -286,6 +288,6 @@ pub fn open_interface(luid: &NET_LUID_LH) -> io::Result<HANDLE> {
         GENERIC_READ.0 | GENERIC_WRITE.0,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         OPEN_EXISTING,
-        FILE_ATTRIBUTE_SYSTEM,
+        FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
     )
 }
