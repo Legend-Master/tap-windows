@@ -142,6 +142,7 @@ pub fn create_file(
 pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
     let mut ret = 0;
     let mut overlapped = OVERLAPPED::default();
+    overlapped.hEvent = unsafe { CreateEventW(None, true, false, None) }?;
     if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
@@ -154,6 +155,7 @@ pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
 pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
     let mut ret = 0;
     let mut overlapped = OVERLAPPED::default();
+    overlapped.hEvent = unsafe { CreateEventW(None, true, false, None) }?;
     if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
