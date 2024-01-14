@@ -230,23 +230,23 @@ impl Device {
     }
 
     pub fn read_non_mut(&self, buf: &mut [u8]) -> io::Result<usize> {
-        ffi::read_file(self.handle, buf).map(|res| res as _)
+        ffi::read_file(self.handle, buf)
     }
 
     pub fn write_non_mut(&self, buf: &[u8]) -> io::Result<usize> {
-        ffi::write_file(self.handle, buf).map(|res| res as _)
+        ffi::write_file(self.handle, buf)
     }
 }
 
 impl io::Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        ffi::read_file(self.handle, buf).map(|res| res as _)
+        ffi::read_file(self.handle, buf)
     }
 }
 
 impl io::Write for Device {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        ffi::write_file(self.handle, buf).map(|res| res as _)
+        ffi::write_file(self.handle, buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
