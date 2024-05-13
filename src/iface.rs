@@ -60,32 +60,34 @@ fn find_and_install_driver(
     let mut driver_version = 0;
     let mut member_index = 0;
 
-    while let Some(mut drvinfo_data) = ffi::enum_driver_info(devinfo, devinfo_data, SPDIT_COMPATDRIVER, member_index)? {
+    while let Some(drvinfo_data) = ffi::enum_driver_info(devinfo, devinfo_data, SPDIT_COMPATDRIVER, member_index) {
         member_index += 1;
 
-        if drvinfo_data.DriverVersion <= driver_version {
-            continue;
+        if let Ok(mut drvinfo_data) = drvinfo_data {
+            if drvinfo_data.DriverVersion <= driver_version {
+                continue;
+            }
+
+            let drvinfo_detail = match ffi::get_driver_info_detail(devinfo, devinfo_data, &drvinfo_data) {
+                Ok(drvinfo_detail) => drvinfo_detail,
+                _ => continue,
+            };
+
+            let hardware_id = unsafe {
+                PCWSTR(drvinfo_detail.HardwareID.as_ptr())
+                    .to_string()
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+            };
+            if !hardware_id.eq_ignore_ascii_case(component_id) {
+                continue;
+            }
+
+            if ffi::set_selected_driver(devinfo, devinfo_data, &mut drvinfo_data).is_err() {
+                continue;
+            }
+
+            driver_version = drvinfo_data.DriverVersion;
         }
-
-        let drvinfo_detail = match ffi::get_driver_info_detail(devinfo, devinfo_data, &drvinfo_data) {
-            Ok(drvinfo_detail) => drvinfo_detail,
-            _ => continue,
-        };
-
-        let hardware_id = unsafe {
-            PCWSTR(drvinfo_detail.HardwareID.as_ptr())
-                .to_string()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
-        };
-        if !hardware_id.eq_ignore_ascii_case(component_id) {
-            continue;
-        }
-
-        if ffi::set_selected_driver(devinfo, devinfo_data, &mut drvinfo_data).is_err() {
-            continue;
-        }
-
-        driver_version = drvinfo_data.DriverVersion;
     }
 
     if driver_version == 0 {
@@ -115,75 +117,57 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
         DIREG_DRV,
         KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
     )?;
-
     let key = windows_registry::Key(key.0);
-
-    while key.get_u32("*IfType").is_err() {
-        ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
-    }
-
-    while key.get_u32("NetLuidIndex").is_err() {
-        ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
-    }
-
-    let luid = get_luid_from_key(&key)?;
+    let luid = loop {
+        if let Ok(luid) = get_luid_from_key(&key) {
+            break luid;
+        } else {
+            ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
+        }
+    };
     Ok(luid)
 }
 
 /// Check if the given interface exists and is a valid network device
 pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
     let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
-
-    let mut member_index = 0;
-
-    while let Some(devinfo_data) = ffi::enum_device_info(*devinfo, member_index)? {
-        member_index += 1;
-
-        let hardware_id = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID);
-        if hardware_id.is_err() {
-            continue;
-        }
-        if !hardware_id?.eq_ignore_ascii_case(component_id) {
-            continue;
-        }
-
-        if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
-            if unsafe { luid.Value == luid2.Value } {
-                // Found it!
-                return Ok(());
+    for devinfo_data in devinfo.device_iter() {
+        if let Ok(devinfo_data) = devinfo_data {
+            if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
+                if !hardware_id.eq_ignore_ascii_case(component_id) {
+                    continue;
+                }
+                if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+                    if unsafe { luid.Value == luid2.Value } {
+                        // Found it!
+                        return Ok(());
+                    }
+                }
             }
         }
     }
-
     Err(io::Error::new(io::ErrorKind::NotFound, "Device not found"))
 }
 
 /// Deletes an existing interface
 pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
     let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
-
-    let mut member_index = 0;
-
-    while let Some(devinfo_data) = ffi::enum_device_info(*devinfo, member_index)? {
-        member_index += 1;
-
-        let hardware_id = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID);
-        if hardware_id.is_err() {
-            continue;
-        }
-        if !hardware_id?.eq_ignore_ascii_case(component_id) {
-            continue;
-        }
-
-        if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
-            if unsafe { luid.Value == luid2.Value } {
-                // Found it!
-                ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REMOVE)?;
-                return Ok(());
+    for devinfo_data in devinfo.device_iter() {
+        if let Ok(devinfo_data) = devinfo_data {
+            if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
+                if !hardware_id.eq_ignore_ascii_case(component_id) {
+                    continue;
+                }
+                if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+                    if unsafe { luid.Value == luid2.Value } {
+                        // Found it!
+                        ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REMOVE)?;
+                        return Ok(());
+                    }
+                }
             }
         }
     }
-
     Err(io::Error::new(io::ErrorKind::NotFound, "Device not found"))
 }
 

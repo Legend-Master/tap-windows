@@ -392,7 +392,7 @@ pub fn enum_driver_info(
     devinfo_data: &SP_DEVINFO_DATA,
     driver_type: SETUP_DI_DRIVER_TYPE,
     member_index: u32,
-) -> io::Result<Option<SP_DRVINFO_DATA_V2_W>> {
+) -> Option<io::Result<SP_DRVINFO_DATA_V2_W>> {
     let mut drvinfo_data: SP_DRVINFO_DATA_V2_W = unsafe { mem::zeroed() };
     drvinfo_data.cbSize = mem::size_of_val(&drvinfo_data) as _;
 
@@ -406,28 +406,28 @@ pub fn enum_driver_info(
         )
     };
     match result {
-        Ok(_) => Ok(Some(drvinfo_data)),
+        Ok(_) => Some(Ok(drvinfo_data)),
         Err(e) => {
             if e.code() == ERROR_NO_MORE_ITEMS.into() {
-                Ok(None)
+                None
             } else {
-                Err(e.into())
+                Some(Err(e.into()))
             }
         }
     }
 }
 
-pub fn enum_device_info(devinfo: HDEVINFO, member_index: u32) -> io::Result<Option<SP_DEVINFO_DATA>> {
+pub fn enum_device_info(devinfo: HDEVINFO, member_index: u32) -> Option<io::Result<SP_DEVINFO_DATA>> {
     let mut devinfo_data: SP_DEVINFO_DATA = unsafe { mem::zeroed() };
     devinfo_data.cbSize = mem::size_of_val(&devinfo_data) as _;
 
     match unsafe { SetupDiEnumDeviceInfo(devinfo, member_index, &mut devinfo_data) } {
-        Ok(_) => Ok(Some(devinfo_data)),
+        Ok(_) => Some(Ok(devinfo_data)),
         Err(e) => {
             if e.code() == ERROR_NO_MORE_ITEMS.into() {
-                Ok(None)
+                None
             } else {
-                Err(e.into())
+                Some(Err(e.into()))
             }
         }
     }
@@ -463,6 +463,10 @@ impl DeviceInfo {
     pub fn new(hdeviceinfo: HDEVINFO) -> Self {
         Self(hdeviceinfo)
     }
+
+    pub fn device_iter(&self) -> DeviceInfoIter {
+        DeviceInfoIter::new(self.0)
+    }
 }
 
 impl Deref for DeviceInfo {
@@ -476,5 +480,26 @@ impl Deref for DeviceInfo {
 impl Drop for DeviceInfo {
     fn drop(&mut self) {
         let _ = destroy_device_info_list(self.0);
+    }
+}
+
+pub struct DeviceInfoIter {
+    handle: HDEVINFO,
+    current: u32,
+}
+
+impl DeviceInfoIter {
+    pub fn new(handle: HDEVINFO) -> Self {
+        Self { handle, current: 0 }
+    }
+}
+
+impl Iterator for DeviceInfoIter {
+    type Item = io::Result<SP_DEVINFO_DATA>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = enum_device_info(self.handle, self.current);
+        self.current += 1;
+        result
     }
 }
