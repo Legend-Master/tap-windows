@@ -50,16 +50,16 @@ pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
     ffi::set_selected_device(devinfo, &devinfo_data)?;
     ffi::set_device_registry_property(devinfo, &devinfo_data, SPDRP_HARDWAREID, Some(component_id))?;
 
-    ffi::build_driver_info_list(devinfo, &mut devinfo_data, SPDIT_COMPATDRIVER.0)?;
+    ffi::build_driver_info_list(devinfo, &mut devinfo_data, SPDIT_COMPATDRIVER)?;
 
     let _guard = guard((), |_| {
-        let _ = ffi::destroy_driver_info_list(devinfo, &devinfo_data, SPDIT_COMPATDRIVER.0);
+        let _ = ffi::destroy_driver_info_list(devinfo, &devinfo_data, SPDIT_COMPATDRIVER);
     });
 
     let mut driver_version = 0;
     let mut member_index = 0;
 
-    while let Some(drvinfo_data) = ffi::enum_driver_info(devinfo, &devinfo_data, SPDIT_COMPATDRIVER.0, member_index) {
+    while let Some(drvinfo_data) = ffi::enum_driver_info(devinfo, &devinfo_data, SPDIT_COMPATDRIVER, member_index) {
         member_index += 1;
 
         if drvinfo_data.is_err() {
@@ -109,24 +109,24 @@ pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
     let key = ffi::open_dev_reg_key(
         devinfo,
         &devinfo_data,
-        DICS_FLAG_GLOBAL,
+        DICS_FLAG_GLOBAL.0,
         0,
         DIREG_DRV,
         KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
     )?;
 
-    let key = winreg::RegKey::predef(key.0);
+    let key = windows_registry::Key(key.0);
 
-    while key.get_value::<u32, &str>("*IfType").is_err() {
+    while key.get_u32("*IfType").is_err() {
         ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
     }
 
-    while key.get_value::<u32, &str>("NetLuidIndex").is_err() {
+    while key.get_u32("NetLuidIndex").is_err() {
         ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
     }
 
-    let if_type: u32 = key.get_value("*IfType")?;
-    let luid_index: u32 = key.get_value("NetLuidIndex")?;
+    let if_type = key.get_u32("*IfType")?;
+    let luid_index = key.get_u32("NetLuidIndex")?;
 
     // Defuse the uninstaller
     ScopeGuard::into_inner(uninstaller);
@@ -171,21 +171,21 @@ pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()>
         let key = match ffi::open_dev_reg_key(
             devinfo,
             &devinfo_data,
-            DICS_FLAG_GLOBAL,
+            DICS_FLAG_GLOBAL.0,
             0,
             DIREG_DRV,
             KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
         ) {
-            Ok(key) => winreg::RegKey::predef(key.0),
+            Ok(key) => windows_registry::Key(key.0),
             Err(_) => continue,
         };
 
-        let if_type: u32 = match key.get_value("*IfType") {
+        let if_type = match key.get_u32("*IfType") {
             Ok(if_type) => if_type,
             Err(_) => continue,
         };
 
-        let luid_index: u32 = match key.get_value("NetLuidIndex") {
+        let luid_index = match key.get_u32("NetLuidIndex") {
             Ok(luid_index) => luid_index,
             Err(_) => continue,
         };
@@ -238,22 +238,22 @@ pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()
         let key = ffi::open_dev_reg_key(
             devinfo,
             &devinfo_data,
-            DICS_FLAG_GLOBAL,
+            DICS_FLAG_GLOBAL.0,
             0,
             DIREG_DRV,
             KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
         );
-        if key.is_err() {
-            continue;
-        }
-        let key = winreg::RegKey::predef(key?.0);
+        let key = match key {
+            Ok(hkey) => windows_registry::Key(hkey.0),
+            Err(_) => continue,
+        };
 
-        let if_type: u32 = match key.get_value("*IfType") {
+        let if_type = match key.get_u32("*IfType") {
             Ok(if_type) => if_type,
             Err(_) => continue,
         };
 
-        let luid_index: u32 = match key.get_value("NetLuidIndex") {
+        let luid_index = match key.get_u32("NetLuidIndex") {
             Ok(luid_index) => luid_index,
             Err(_) => continue,
         };

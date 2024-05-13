@@ -13,8 +13,9 @@ use windows::{
             SetupDiDestroyDriverInfoList, SetupDiEnumDeviceInfo, SetupDiEnumDriverInfoW, SetupDiGetClassDevsW,
             SetupDiGetDeviceRegistryPropertyW, SetupDiGetDriverInfoDetailW, SetupDiOpenDevRegKey,
             SetupDiSetClassInstallParamsW, SetupDiSetDeviceRegistryPropertyW, SetupDiSetSelectedDevice,
-            SetupDiSetSelectedDriverW, HDEVINFO, MAX_CLASS_NAME_LEN, SETUP_DI_BUILD_DRIVER_DRIVER_TYPE,
-            SP_DEVINFO_DATA, SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
+            SetupDiSetSelectedDriverW, DI_FUNCTION, HDEVINFO, MAX_CLASS_NAME_LEN, SETUP_DI_DEVICE_CREATION_FLAGS,
+            SETUP_DI_DRIVER_TYPE, SETUP_DI_GET_CLASS_DEVS_FLAGS, SETUP_DI_REGISTRY_PROPERTY, SP_DEVINFO_DATA,
+            SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
         },
         Foundation::{
             CloseHandle, GetLastError, BOOL, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_NO_MORE_ITEMS, FALSE,
@@ -75,7 +76,7 @@ pub fn alias_to_luid(alias: &str) -> io::Result<NET_LUID_LH> {
     let alias = alias.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let mut luid = unsafe { mem::zeroed() };
     unsafe {
-        ConvertInterfaceAliasToLuid(PCWSTR(alias.as_ptr()), &mut luid)?;
+        ConvertInterfaceAliasToLuid(PCWSTR(alias.as_ptr()), &mut luid).ok()?;
     }
     Ok(luid)
 }
@@ -83,7 +84,7 @@ pub fn alias_to_luid(alias: &str) -> io::Result<NET_LUID_LH> {
 pub fn luid_to_index(luid: &NET_LUID_LH) -> io::Result<u32> {
     let mut index = 0;
     unsafe {
-        ConvertInterfaceLuidToIndex(luid, &mut index)?;
+        ConvertInterfaceLuidToIndex(luid, &mut index).ok()?;
     }
     Ok(index)
 }
@@ -91,7 +92,7 @@ pub fn luid_to_index(luid: &NET_LUID_LH) -> io::Result<u32> {
 pub fn luid_to_guid(luid: &NET_LUID_LH) -> io::Result<GUID> {
     let mut guid = unsafe { mem::zeroed() };
     unsafe {
-        ConvertInterfaceLuidToGuid(luid, &mut guid)?;
+        ConvertInterfaceLuidToGuid(luid, &mut guid).ok()?;
     }
     Ok(guid)
 }
@@ -100,7 +101,7 @@ pub fn luid_to_alias(luid: &NET_LUID_LH) -> io::Result<String> {
     unsafe {
         // IF_MAX_STRING_SIZE + 1
         let mut alias = vec![0; 257];
-        ConvertInterfaceLuidToAlias(luid, &mut alias)?;
+        ConvertInterfaceLuidToAlias(luid, &mut alias).ok()?;
 
         let alias = PCWSTR(alias.as_ptr())
             .to_string()
@@ -170,7 +171,7 @@ pub fn create_device_info_list(guid: &GUID) -> io::Result<HDEVINFO> {
     Ok(devinfo)
 }
 
-pub fn get_class_devs(guid: &GUID, flags: u32) -> io::Result<HDEVINFO> {
+pub fn get_class_devs(guid: &GUID, flags: SETUP_DI_GET_CLASS_DEVS_FLAGS) -> io::Result<HDEVINFO> {
     let devinfo = unsafe { SetupDiGetClassDevsW(Some(guid), PCWSTR::null(), HWND::default(), flags)? };
     Ok(devinfo)
 }
@@ -198,7 +199,7 @@ pub fn create_device_info(
     device_name: &str,
     guid: &GUID,
     device_description: &str,
-    creation_flags: u32,
+    creation_flags: SETUP_DI_DEVICE_CREATION_FLAGS,
 ) -> io::Result<SP_DEVINFO_DATA> {
     let mut devinfo_data: SP_DEVINFO_DATA = unsafe { mem::zeroed() };
     devinfo_data.cbSize = mem::size_of_val(&devinfo_data) as _;
@@ -228,7 +229,7 @@ pub fn set_selected_device(devinfo: HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) ->
 pub fn set_device_registry_property(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    property: u32,
+    property: SETUP_DI_REGISTRY_PROPERTY,
     value: Option<&str>,
 ) -> io::Result<()> {
     unsafe {
@@ -249,7 +250,7 @@ pub fn set_device_registry_property(
 pub fn get_device_registry_property(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    property: u32,
+    property: SETUP_DI_REGISTRY_PROPERTY,
 ) -> io::Result<String> {
     unsafe {
         let mut requiredsize = 0;
@@ -291,19 +292,19 @@ pub fn get_device_registry_property(
 pub fn build_driver_info_list(
     devinfo: HDEVINFO,
     devinfo_data: &mut SP_DEVINFO_DATA,
-    driver_type: u32,
+    driver_type: SETUP_DI_DRIVER_TYPE,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiBuildDriverInfoList(
-            devinfo,
-            Some(devinfo_data as &mut _),
-            SETUP_DI_BUILD_DRIVER_DRIVER_TYPE(driver_type),
-        )?;
+        SetupDiBuildDriverInfoList(devinfo, Some(devinfo_data as &mut _), driver_type)?;
     }
     Ok(())
 }
 
-pub fn destroy_driver_info_list(devinfo: HDEVINFO, devinfo_data: &SP_DEVINFO_DATA, driver_type: u32) -> io::Result<()> {
+pub fn destroy_driver_info_list(
+    devinfo: HDEVINFO,
+    devinfo_data: &SP_DEVINFO_DATA,
+    driver_type: SETUP_DI_DRIVER_TYPE,
+) -> io::Result<()> {
     unsafe {
         SetupDiDestroyDriverInfoList(devinfo, Some(devinfo_data as *const _ as _), driver_type)?;
     }
@@ -365,7 +366,7 @@ pub fn set_class_install_params(
 pub fn call_class_installer(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    install_function: u32,
+    install_function: DI_FUNCTION,
 ) -> io::Result<()> {
     unsafe {
         SetupDiCallClassInstaller(install_function, devinfo, Some(devinfo_data as *const _ as _))?;
@@ -402,7 +403,7 @@ pub fn notify_change_key_value(
 ) -> io::Result<()> {
     unsafe {
         let event = CreateEventW(None, FALSE, FALSE, None)?;
-        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), event, TRUE)?;
+        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), event, TRUE).ok()?;
         match WaitForSingleObject(event, milliseconds) {
             WAIT_OBJECT_0 => Ok(()),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "Registry timed out")),
@@ -414,7 +415,7 @@ pub fn notify_change_key_value(
 pub fn enum_driver_info(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    driver_type: u32,
+    driver_type: SETUP_DI_DRIVER_TYPE,
     member_index: u32,
 ) -> Option<io::Result<SP_DRVINFO_DATA_V2_W>> {
     let mut drvinfo_data: SP_DRVINFO_DATA_V2_W = unsafe { mem::zeroed() };
