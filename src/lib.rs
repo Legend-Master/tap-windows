@@ -169,21 +169,24 @@ impl Device {
     /// Retieve the mac of the interface
     pub fn get_mac(&self) -> io::Result<[u8; 6]> {
         let mut mac = [0; 6];
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MAC, &(), &mut mac).map(|_| mac)
+        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MAC, &(), &mut mac)?;
+        Ok(mac)
     }
 
     /// Retrieve the version of the driver
     pub fn get_version(&self) -> io::Result<[u64; 3]> {
         let in_version: [u64; 3] = [0; 3];
         let mut out_version: [u64; 3] = [0; 3];
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_VERSION, &in_version, &mut out_version).map(|_| out_version)
+        ffi::device_io_control(self.handle, TAP_IOCTL_GET_VERSION, &in_version, &mut out_version)?;
+        Ok(out_version)
     }
 
     /// Retieve the mtu of the interface
     pub fn get_mtu(&self) -> io::Result<u32> {
         let in_mtu: u32 = 0;
         let mut out_mtu = 0;
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MTU, &in_mtu, &mut out_mtu).map(|_| out_mtu)
+        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MTU, &in_mtu, &mut out_mtu)?;
+        Ok(out_mtu)
     }
 
     /// Retrieve the name of the interface

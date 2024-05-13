@@ -1,12 +1,12 @@
 use crate::ffi;
-use scopeguard::{guard, ScopeGuard};
 use std::io;
 use windows::{
     core::{GUID, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             DICD_GENERATE_ID, DICS_FLAG_GLOBAL, DIF_INSTALLDEVICE, DIF_INSTALLINTERFACES, DIF_REGISTERDEVICE,
-            DIF_REGISTER_COINSTALLERS, DIF_REMOVE, DIGCF_PRESENT, DIREG_DRV, SPDIT_COMPATDRIVER, SPDRP_HARDWAREID,
+            DIF_REGISTER_COINSTALLERS, DIF_REMOVE, DIGCF_PRESENT, DIREG_DRV, HDEVINFO, SPDIT_COMPATDRIVER,
+            SPDRP_HARDWAREID, SP_DEVINFO_DATA,
         },
         Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE},
         NetworkManagement::Ndis::NET_LUID_LH,
@@ -37,40 +37,37 @@ struct _NET_LUID_LH {
 
 /// Create a new interface and returns its NET_LUID
 pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
-    let devinfo = ffi::create_device_info_list(&GUID_NETWORK_ADAPTER)?;
-
-    let _guard = guard((), |_| {
-        let _ = ffi::destroy_device_info_list(devinfo);
-    });
+    let devinfo = ffi::DeviceInfo::new(ffi::create_device_info_list(&GUID_NETWORK_ADAPTER)?);
 
     let class_name = ffi::class_name_from_guid(&GUID_NETWORK_ADAPTER)?;
 
-    let mut devinfo_data = ffi::create_device_info(devinfo, &class_name, &GUID_NETWORK_ADAPTER, "", DICD_GENERATE_ID)?;
+    let mut devinfo_data = ffi::create_device_info(*devinfo, &class_name, &GUID_NETWORK_ADAPTER, "", DICD_GENERATE_ID)?;
 
-    ffi::set_selected_device(devinfo, &devinfo_data)?;
-    ffi::set_device_registry_property(devinfo, &devinfo_data, SPDRP_HARDWAREID, Some(component_id))?;
+    ffi::set_selected_device(*devinfo, &devinfo_data)?;
+    ffi::set_device_registry_property(*devinfo, &mut devinfo_data, SPDRP_HARDWAREID, Some(component_id))?;
 
-    ffi::build_driver_info_list(devinfo, &mut devinfo_data, SPDIT_COMPATDRIVER)?;
+    ffi::build_driver_info_list(*devinfo, &mut devinfo_data, SPDIT_COMPATDRIVER)?;
+    let result = find_and_install_driver(*devinfo, &mut devinfo_data, component_id);
+    let _ = ffi::destroy_driver_info_list(*devinfo, &devinfo_data, SPDIT_COMPATDRIVER);
+    result
+}
 
-    let _guard = guard((), |_| {
-        let _ = ffi::destroy_driver_info_list(devinfo, &devinfo_data, SPDIT_COMPATDRIVER);
-    });
-
+fn find_and_install_driver(
+    devinfo: HDEVINFO,
+    devinfo_data: &mut SP_DEVINFO_DATA,
+    component_id: &str,
+) -> io::Result<NET_LUID_LH> {
     let mut driver_version = 0;
     let mut member_index = 0;
 
-    while let Some(drvinfo_data) = ffi::enum_driver_info(devinfo, &devinfo_data, SPDIT_COMPATDRIVER, member_index) {
+    while let Some(mut drvinfo_data) = ffi::enum_driver_info(devinfo, devinfo_data, SPDIT_COMPATDRIVER, member_index)? {
         member_index += 1;
 
-        if drvinfo_data.is_err() {
-            continue;
-        }
-        let drvinfo_data = drvinfo_data?;
         if drvinfo_data.DriverVersion <= driver_version {
             continue;
         }
 
-        let drvinfo_detail = match ffi::get_driver_info_detail(devinfo, &devinfo_data, &drvinfo_data) {
+        let drvinfo_detail = match ffi::get_driver_info_detail(devinfo, devinfo_data, &drvinfo_data) {
             Ok(drvinfo_detail) => drvinfo_detail,
             _ => continue,
         };
@@ -84,7 +81,7 @@ pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
             continue;
         }
 
-        if ffi::set_selected_driver(devinfo, &devinfo_data, &drvinfo_data).is_err() {
+        if ffi::set_selected_driver(devinfo, devinfo_data, &mut drvinfo_data).is_err() {
             continue;
         }
 
@@ -95,19 +92,23 @@ pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
         return Err(io::Error::new(io::ErrorKind::NotFound, "No driver found"));
     }
 
-    let uninstaller = guard((), |_| {
+    let result = install_device_and_get_luid(&devinfo, &devinfo_data);
+    if result.is_err() {
         let _ = ffi::call_class_installer(devinfo, &devinfo_data, DIF_REMOVE);
-    });
+    }
+    result
+}
 
-    ffi::call_class_installer(devinfo, &devinfo_data, DIF_REGISTERDEVICE)?;
+fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<NET_LUID_LH> {
+    ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REGISTERDEVICE)?;
 
-    let _ = ffi::call_class_installer(devinfo, &devinfo_data, DIF_REGISTER_COINSTALLERS);
-    let _ = ffi::call_class_installer(devinfo, &devinfo_data, DIF_INSTALLINTERFACES);
+    let _ = ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REGISTER_COINSTALLERS);
+    let _ = ffi::call_class_installer(*devinfo, &devinfo_data, DIF_INSTALLINTERFACES);
 
-    ffi::call_class_installer(devinfo, &devinfo_data, DIF_INSTALLDEVICE)?;
+    ffi::call_class_installer(*devinfo, &devinfo_data, DIF_INSTALLDEVICE)?;
 
     let key = ffi::open_dev_reg_key(
-        devinfo,
+        *devinfo,
         &devinfo_data,
         DICS_FLAG_GLOBAL.0,
         0,
@@ -125,42 +126,20 @@ pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
         ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
     }
 
-    let if_type = key.get_u32("*IfType")?;
-    let luid_index = key.get_u32("NetLuidIndex")?;
-
-    // Defuse the uninstaller
-    ScopeGuard::into_inner(uninstaller);
-
-    let mut luid = NET_LUID_LH { Value: 0 };
-
-    unsafe {
-        let luid = &mut luid as *mut NET_LUID_LH as *mut _NET_LUID_LH;
-        (*luid).set_IfType(if_type as _);
-        (*luid).set_NetLuidIndex(luid_index as _);
-    }
-
+    let luid = get_luid_from_key(&key)?;
     Ok(luid)
 }
 
 /// Check if the given interface exists and is a valid network device
 pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
-    let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
-
-    let _guard = guard((), |_| {
-        let _ = ffi::destroy_device_info_list(devinfo);
-    });
+    let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
 
     let mut member_index = 0;
 
-    while let Some(devinfo_data) = ffi::enum_device_info(devinfo, member_index) {
+    while let Some(devinfo_data) = ffi::enum_device_info(*devinfo, member_index)? {
         member_index += 1;
 
-        if devinfo_data.is_err() {
-            continue;
-        }
-        let devinfo_data = devinfo_data?;
-
-        let hardware_id = ffi::get_device_registry_property(devinfo, &devinfo_data, SPDRP_HARDWAREID);
+        let hardware_id = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID);
         if hardware_id.is_err() {
             continue;
         }
@@ -168,42 +147,12 @@ pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()>
             continue;
         }
 
-        let key = match ffi::open_dev_reg_key(
-            devinfo,
-            &devinfo_data,
-            DICS_FLAG_GLOBAL.0,
-            0,
-            DIREG_DRV,
-            KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
-        ) {
-            Ok(key) => windows_registry::Key(key.0),
-            Err(_) => continue,
-        };
-
-        let if_type = match key.get_u32("*IfType") {
-            Ok(if_type) => if_type,
-            Err(_) => continue,
-        };
-
-        let luid_index = match key.get_u32("NetLuidIndex") {
-            Ok(luid_index) => luid_index,
-            Err(_) => continue,
-        };
-
-        let mut luid2 = NET_LUID_LH { Value: 0 };
-
-        unsafe {
-            let luid2 = &mut luid2 as *mut NET_LUID_LH as *mut _NET_LUID_LH;
-            (*luid2).set_IfType(if_type as _);
-            (*luid2).set_NetLuidIndex(luid_index as _);
+        if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+            if unsafe { luid.Value == luid2.Value } {
+                // Found it!
+                return Ok(());
+            }
         }
-
-        if unsafe { luid.Value != luid2.Value } {
-            continue;
-        }
-
-        // Found it!
-        return Ok(());
     }
 
     Err(io::Error::new(io::ErrorKind::NotFound, "Device not found"))
@@ -211,23 +160,14 @@ pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()>
 
 /// Deletes an existing interface
 pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
-    let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
-
-    let _guard = guard((), |_| {
-        let _ = ffi::destroy_device_info_list(devinfo);
-    });
+    let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
 
     let mut member_index = 0;
 
-    while let Some(devinfo_data) = ffi::enum_device_info(devinfo, member_index) {
+    while let Some(devinfo_data) = ffi::enum_device_info(*devinfo, member_index)? {
         member_index += 1;
 
-        if devinfo_data.is_err() {
-            continue;
-        }
-        let devinfo_data = devinfo_data?;
-
-        let hardware_id = ffi::get_device_registry_property(devinfo, &devinfo_data, SPDRP_HARDWAREID);
+        let hardware_id = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID);
         if hardware_id.is_err() {
             continue;
         }
@@ -235,43 +175,13 @@ pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()
             continue;
         }
 
-        let key = ffi::open_dev_reg_key(
-            devinfo,
-            &devinfo_data,
-            DICS_FLAG_GLOBAL.0,
-            0,
-            DIREG_DRV,
-            KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
-        );
-        let key = match key {
-            Ok(hkey) => windows_registry::Key(hkey.0),
-            Err(_) => continue,
-        };
-
-        let if_type = match key.get_u32("*IfType") {
-            Ok(if_type) => if_type,
-            Err(_) => continue,
-        };
-
-        let luid_index = match key.get_u32("NetLuidIndex") {
-            Ok(luid_index) => luid_index,
-            Err(_) => continue,
-        };
-
-        let mut luid2 = NET_LUID_LH { Value: 0 };
-
-        unsafe {
-            let luid2 = &mut luid2 as *mut NET_LUID_LH as *mut _NET_LUID_LH;
-            (*luid2).set_IfType(if_type as _);
-            (*luid2).set_NetLuidIndex(luid_index as _);
+        if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+            if unsafe { luid.Value == luid2.Value } {
+                // Found it!
+                ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REMOVE)?;
+                return Ok(());
+            }
         }
-
-        if unsafe { luid.Value != luid2.Value } {
-            continue;
-        }
-
-        // Found it!
-        return ffi::call_class_installer(devinfo, &devinfo_data, DIF_REMOVE);
     }
 
     Err(io::Error::new(io::ErrorKind::NotFound, "Device not found"))
@@ -290,4 +200,32 @@ pub fn open_interface(luid: &NET_LUID_LH) -> io::Result<HANDLE> {
         OPEN_EXISTING,
         FILE_ATTRIBUTE_SYSTEM | FILE_FLAG_OVERLAPPED,
     )
+}
+
+fn get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<NET_LUID_LH> {
+    let key = windows_registry::Key(
+        ffi::open_dev_reg_key(
+            *devinfo,
+            devinfo_data,
+            DICS_FLAG_GLOBAL.0,
+            0,
+            DIREG_DRV,
+            KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
+        )?
+        .0,
+    );
+    get_luid_from_key(&key)
+}
+
+fn get_luid_from_key(key: &windows_registry::Key) -> io::Result<NET_LUID_LH> {
+    let if_type = key.get_u32("*IfType")?;
+    let luid_index = key.get_u32("NetLuidIndex")?;
+
+    let mut luid2 = NET_LUID_LH { Value: 0 };
+    unsafe {
+        let luid2 = &mut luid2 as *mut NET_LUID_LH as *mut _NET_LUID_LH;
+        (*luid2).set_IfType(if_type as _);
+        (*luid2).set_NetLuidIndex(luid_index as _);
+    }
+    Ok(luid2)
 }

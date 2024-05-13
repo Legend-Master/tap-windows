@@ -3,7 +3,7 @@
 
 //! Module holding safe wrappers over winapi functions
 
-use std::{ffi::c_void, fmt::Error, io, mem, ptr};
+use std::{ffi::c_void, fmt::Error, io, mem, ops::Deref, ptr};
 use windows::{
     core::{GUID, HRESULT, PCWSTR},
     Win32::{
@@ -14,8 +14,8 @@ use windows::{
             SetupDiGetDeviceRegistryPropertyW, SetupDiGetDriverInfoDetailW, SetupDiOpenDevRegKey,
             SetupDiSetClassInstallParamsW, SetupDiSetDeviceRegistryPropertyW, SetupDiSetSelectedDevice,
             SetupDiSetSelectedDriverW, DI_FUNCTION, HDEVINFO, MAX_CLASS_NAME_LEN, SETUP_DI_DEVICE_CREATION_FLAGS,
-            SETUP_DI_DRIVER_TYPE, SETUP_DI_GET_CLASS_DEVS_FLAGS, SETUP_DI_REGISTRY_PROPERTY, SP_DEVINFO_DATA,
-            SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
+            SETUP_DI_DRIVER_TYPE, SETUP_DI_GET_CLASS_DEVS_FLAGS, SETUP_DI_REGISTRY_PROPERTY, SP_CLASSINSTALL_HEADER,
+            SP_DEVINFO_DATA, SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
         },
         Foundation::{
             CloseHandle, GetLastError, BOOL, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_NO_MORE_ITEMS, FALSE,
@@ -221,14 +221,14 @@ pub fn create_device_info(
 
 pub fn set_selected_device(devinfo: HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<()> {
     unsafe {
-        SetupDiSetSelectedDevice(devinfo, devinfo_data as *const _ as _)?;
+        SetupDiSetSelectedDevice(devinfo, devinfo_data)?;
     }
     Ok(())
 }
 
 pub fn set_device_registry_property(
     devinfo: HDEVINFO,
-    devinfo_data: &SP_DEVINFO_DATA,
+    devinfo_data: &mut SP_DEVINFO_DATA,
     property: SETUP_DI_REGISTRY_PROPERTY,
     value: Option<&str>,
 ) -> io::Result<()> {
@@ -242,7 +242,7 @@ pub fn set_device_registry_property(
                 .flat_map(|&x| x.to_le_bytes().to_vec())
                 .collect::<Vec<u8>>()
         });
-        SetupDiSetDeviceRegistryPropertyW(devinfo, devinfo_data as *const _ as _, property, value.as_deref())?;
+        SetupDiSetDeviceRegistryPropertyW(devinfo, &mut *devinfo_data, property, value.as_deref())?;
     }
     Ok(())
 }
@@ -255,14 +255,7 @@ pub fn get_device_registry_property(
     unsafe {
         let mut requiredsize = 0;
 
-        let r = SetupDiGetDeviceRegistryPropertyW(
-            devinfo,
-            devinfo_data as *const _ as _,
-            property,
-            None,
-            None,
-            Some(&mut requiredsize),
-        );
+        let r = SetupDiGetDeviceRegistryPropertyW(devinfo, devinfo_data, property, None, None, Some(&mut requiredsize));
         if let Err(e) = r {
             if e.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult() {
                 return Err(e.into());
@@ -295,7 +288,7 @@ pub fn build_driver_info_list(
     driver_type: SETUP_DI_DRIVER_TYPE,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiBuildDriverInfoList(devinfo, Some(devinfo_data as &mut _), driver_type)?;
+        SetupDiBuildDriverInfoList(devinfo, Some(devinfo_data), driver_type)?;
     }
     Ok(())
 }
@@ -306,7 +299,7 @@ pub fn destroy_driver_info_list(
     driver_type: SETUP_DI_DRIVER_TYPE,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiDestroyDriverInfoList(devinfo, Some(devinfo_data as *const _ as _), driver_type)?;
+        SetupDiDestroyDriverInfoList(devinfo, Some(devinfo_data), driver_type)?;
     }
     Ok(())
 }
@@ -322,8 +315,8 @@ pub fn get_driver_info_detail(
     unsafe {
         SetupDiGetDriverInfoDetailW(
             devinfo,
-            Some(devinfo_data as *const _ as _),
-            drvinfo_data as *const _ as _,
+            Some(devinfo_data),
+            drvinfo_data,
             Some(&mut drvinfo_detail as *mut _ as _),
             mem::size_of_val(&drvinfo_detail) as _,
             None,
@@ -334,15 +327,11 @@ pub fn get_driver_info_detail(
 
 pub fn set_selected_driver(
     devinfo: HDEVINFO,
-    devinfo_data: &SP_DEVINFO_DATA,
-    drvinfo_data: &SP_DRVINFO_DATA_V2_W,
+    devinfo_data: &mut SP_DEVINFO_DATA,
+    drvinfo_data: &mut SP_DRVINFO_DATA_V2_W,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiSetSelectedDriverW(
-            devinfo,
-            Some(devinfo_data as *const _ as _),
-            Some(drvinfo_data as *const _ as _),
-        )?;
+        SetupDiSetSelectedDriverW(devinfo, Some(devinfo_data), Some(drvinfo_data))?;
     }
     Ok(())
 }
@@ -350,15 +339,10 @@ pub fn set_selected_driver(
 pub fn set_class_install_params(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    params: &impl Copy,
+    params: &SP_CLASSINSTALL_HEADER,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiSetClassInstallParamsW(
-            devinfo,
-            Some(devinfo_data as *const _ as _),
-            Some(params as *const _ as _),
-            mem::size_of_val(params) as _,
-        )?;
+        SetupDiSetClassInstallParamsW(devinfo, Some(devinfo_data), Some(params), mem::size_of_val(params) as _)?;
     }
     Ok(())
 }
@@ -369,7 +353,7 @@ pub fn call_class_installer(
     install_function: DI_FUNCTION,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiCallClassInstaller(install_function, devinfo, Some(devinfo_data as *const _ as _))?;
+        SetupDiCallClassInstaller(install_function, devinfo, Some(devinfo_data))?;
     }
     Ok(())
 }
@@ -382,16 +366,7 @@ pub fn open_dev_reg_key(
     key_type: u32,
     sam_desired: u32,
 ) -> io::Result<HKEY> {
-    let key = unsafe {
-        SetupDiOpenDevRegKey(
-            devinfo,
-            devinfo_data as *const _ as _,
-            scope,
-            hw_profile,
-            key_type,
-            sam_desired,
-        )?
-    };
+    let key = unsafe { SetupDiOpenDevRegKey(devinfo, devinfo_data, scope, hw_profile, key_type, sam_desired)? };
     Ok(key)
 }
 
@@ -417,42 +392,42 @@ pub fn enum_driver_info(
     devinfo_data: &SP_DEVINFO_DATA,
     driver_type: SETUP_DI_DRIVER_TYPE,
     member_index: u32,
-) -> Option<io::Result<SP_DRVINFO_DATA_V2_W>> {
+) -> io::Result<Option<SP_DRVINFO_DATA_V2_W>> {
     let mut drvinfo_data: SP_DRVINFO_DATA_V2_W = unsafe { mem::zeroed() };
     drvinfo_data.cbSize = mem::size_of_val(&drvinfo_data) as _;
 
     let result = unsafe {
         SetupDiEnumDriverInfoW(
             devinfo,
-            Some(devinfo_data as *const _ as _),
+            Some(devinfo_data),
             driver_type,
             member_index,
             &mut drvinfo_data,
         )
     };
     match result {
-        Ok(_) => Some(Ok(drvinfo_data)),
+        Ok(_) => Ok(Some(drvinfo_data)),
         Err(e) => {
-            if e.code() == HRESULT::from(ERROR_NO_MORE_ITEMS) {
-                None
+            if e.code() == ERROR_NO_MORE_ITEMS.into() {
+                Ok(None)
             } else {
-                Some(Err(e.into()))
+                Err(e.into())
             }
         }
     }
 }
 
-pub fn enum_device_info(devinfo: HDEVINFO, member_index: u32) -> Option<io::Result<SP_DEVINFO_DATA>> {
+pub fn enum_device_info(devinfo: HDEVINFO, member_index: u32) -> io::Result<Option<SP_DEVINFO_DATA>> {
     let mut devinfo_data: SP_DEVINFO_DATA = unsafe { mem::zeroed() };
     devinfo_data.cbSize = mem::size_of_val(&devinfo_data) as _;
 
     match unsafe { SetupDiEnumDeviceInfo(devinfo, member_index, &mut devinfo_data) } {
-        Ok(_) => Some(Ok(devinfo_data)),
+        Ok(_) => Ok(Some(devinfo_data)),
         Err(e) => {
-            if e.code() == HRESULT::from(ERROR_NO_MORE_ITEMS) {
-                None
+            if e.code() == ERROR_NO_MORE_ITEMS.into() {
+                Ok(None)
             } else {
-                Some(Err(e.into()))
+                Err(e.into())
             }
         }
     }
@@ -478,4 +453,28 @@ pub fn device_io_control(
         )?;
     }
     Ok(())
+}
+
+/// Wrapper around `HDEVINFO` for freeing it on drop
+// Use `Owned` instead when next version of windows crate gets published
+pub struct DeviceInfo(HDEVINFO);
+
+impl DeviceInfo {
+    pub fn new(hdeviceinfo: HDEVINFO) -> Self {
+        Self(hdeviceinfo)
+    }
+}
+
+impl Deref for DeviceInfo {
+    type Target = HDEVINFO;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for DeviceInfo {
+    fn drop(&mut self) {
+        let _ = destroy_device_info_list(self.0);
+    }
 }
