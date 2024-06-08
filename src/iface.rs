@@ -1,7 +1,7 @@
-use crate::ffi;
+use crate::ffi::{self, DeviceInfoIter};
 use std::io;
 use windows::{
-    core::{GUID, PCWSTR},
+    core::{Owned, GUID, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             DICD_GENERATE_ID, DICS_FLAG_GLOBAL, DIF_INSTALLDEVICE, DIF_INSTALLINTERFACES, DIF_REGISTERDEVICE,
@@ -37,7 +37,7 @@ struct _NET_LUID_LH {
 
 /// Create a new interface and returns its NET_LUID
 pub fn create_interface(component_id: &str) -> io::Result<NET_LUID_LH> {
-    let devinfo = ffi::DeviceInfo::new(ffi::create_device_info_list(&GUID_NETWORK_ADAPTER)?);
+    let devinfo = ffi::create_device_info_list(&GUID_NETWORK_ADAPTER)?;
 
     let class_name = ffi::class_name_from_guid(&GUID_NETWORK_ADAPTER)?;
 
@@ -130,8 +130,8 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
 
 /// Check if the given interface exists and is a valid network device
 pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
-    let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
-    for devinfo_data in devinfo.device_iter() {
+    let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
+    for devinfo_data in DeviceInfoIter::new(*devinfo) {
         if let Ok(devinfo_data) = devinfo_data {
             if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
                 if !hardware_id.eq_ignore_ascii_case(component_id) {
@@ -151,8 +151,8 @@ pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()>
 
 /// Deletes an existing interface
 pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
-    let devinfo = ffi::DeviceInfo::new(ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?);
-    for devinfo_data in devinfo.device_iter() {
+    let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
+    for devinfo_data in DeviceInfoIter::new(*devinfo) {
         if let Ok(devinfo_data) = devinfo_data {
             if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
                 if !hardware_id.eq_ignore_ascii_case(component_id) {
@@ -172,7 +172,7 @@ pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()
 }
 
 /// Open an handle to an interface
-pub fn open_interface(luid: &NET_LUID_LH) -> io::Result<HANDLE> {
+pub fn open_interface(luid: &NET_LUID_LH) -> io::Result<Owned<HANDLE>> {
     let guid = ffi::luid_to_guid(luid).and_then(|guid| ffi::string_from_guid(&guid))?;
 
     let path = format!(r"\\.\Global\{}.tap", guid);

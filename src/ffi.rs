@@ -5,7 +5,7 @@
 
 use std::{ffi::c_void, fmt::Error, io, mem, ops::Deref, ptr};
 use windows::{
-    core::{GUID, HRESULT, PCWSTR},
+    core::{Owned, GUID, HRESULT, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             SetupDiBuildDriverInfoList, SetupDiCallClassInstaller, SetupDiClassNameFromGuidW,
@@ -111,20 +111,13 @@ pub fn luid_to_alias(luid: &NET_LUID_LH) -> io::Result<String> {
     }
 }
 
-pub fn close_handle(handle: HANDLE) -> io::Result<()> {
-    unsafe {
-        CloseHandle(handle);
-    }
-    Ok(())
-}
-
 pub fn create_file(
     file_name: &str,
     desired_access: u32,
     share_mode: FILE_SHARE_MODE,
     creation_disposition: FILE_CREATION_DISPOSITION,
     flags_and_attributes: FILE_FLAGS_AND_ATTRIBUTES,
-) -> io::Result<HANDLE> {
+) -> io::Result<Owned<HANDLE>> {
     let file_name = file_name.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let handle = unsafe {
         CreateFileW(
@@ -137,7 +130,7 @@ pub fn create_file(
             None,
         )?
     };
-    Ok(handle)
+    Ok(unsafe { Owned::new(handle) })
 }
 
 pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
@@ -166,14 +159,14 @@ pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
     Ok(ret as _)
 }
 
-pub fn create_device_info_list(guid: &GUID) -> io::Result<HDEVINFO> {
+pub fn create_device_info_list(guid: &GUID) -> io::Result<Owned<HDEVINFO>> {
     let devinfo = unsafe { SetupDiCreateDeviceInfoList(Some(guid), HWND::default())? };
-    Ok(devinfo)
+    Ok(unsafe { Owned::new(devinfo) })
 }
 
-pub fn get_class_devs(guid: &GUID, flags: SETUP_DI_GET_CLASS_DEVS_FLAGS) -> io::Result<HDEVINFO> {
+pub fn get_class_devs(guid: &GUID, flags: SETUP_DI_GET_CLASS_DEVS_FLAGS) -> io::Result<Owned<HDEVINFO>> {
     let devinfo = unsafe { SetupDiGetClassDevsW(Some(guid), PCWSTR::null(), HWND::default(), flags)? };
-    Ok(devinfo)
+    Ok(unsafe { Owned::new(devinfo) })
 }
 
 pub fn destroy_device_info_list(devinfo: HDEVINFO) -> io::Result<()> {
@@ -453,34 +446,6 @@ pub fn device_io_control(
         )?;
     }
     Ok(())
-}
-
-/// Wrapper around `HDEVINFO` for freeing it on drop
-// Use `Owned` instead when next version of windows crate gets published
-pub struct DeviceInfo(HDEVINFO);
-
-impl DeviceInfo {
-    pub fn new(hdeviceinfo: HDEVINFO) -> Self {
-        Self(hdeviceinfo)
-    }
-
-    pub fn device_iter(&self) -> DeviceInfoIter {
-        DeviceInfoIter::new(self.0)
-    }
-}
-
-impl Deref for DeviceInfo {
-    type Target = HDEVINFO;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Drop for DeviceInfo {
-    fn drop(&mut self) {
-        let _ = destroy_device_info_list(self.0);
-    }
 }
 
 pub struct DeviceInfoIter {
