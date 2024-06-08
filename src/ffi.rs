@@ -362,9 +362,9 @@ pub fn open_dev_reg_key(
     hw_profile: u32,
     key_type: u32,
     sam_desired: u32,
-) -> io::Result<HKEY> {
+) -> io::Result<windows_registry::Key> {
     let key = unsafe { SetupDiOpenDevRegKey(devinfo, devinfo_data, scope, hw_profile, key_type, sam_desired)? };
-    Ok(key)
+    Ok(unsafe { windows_registry::Key::from_raw(key.0) })
 }
 
 pub fn notify_change_key_value(
