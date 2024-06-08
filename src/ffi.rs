@@ -239,7 +239,7 @@ pub fn set_device_registry_property(
                 .flat_map(|&x| x.to_le_bytes().to_vec())
                 .collect::<Vec<u8>>()
         });
-        SetupDiSetDeviceRegistryPropertyW(devinfo, &mut *devinfo_data, property, value.as_deref())?;
+        SetupDiSetDeviceRegistryPropertyW(devinfo, devinfo_data, property, value.as_deref())?;
     }
     Ok(())
 }
