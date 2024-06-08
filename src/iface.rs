@@ -94,24 +94,24 @@ fn find_and_install_driver(
         return Err(io::Error::new(io::ErrorKind::NotFound, "No driver found"));
     }
 
-    let result = install_device_and_get_luid(&devinfo, &devinfo_data);
+    let result = install_device_and_get_luid(&devinfo, devinfo_data);
     if result.is_err() {
-        let _ = ffi::call_class_installer(devinfo, &devinfo_data, DIF_REMOVE);
+        let _ = ffi::call_class_installer(devinfo, devinfo_data, DIF_REMOVE);
     }
     result
 }
 
 fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<NET_LUID_LH> {
-    ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REGISTERDEVICE)?;
+    ffi::call_class_installer(*devinfo, devinfo_data, DIF_REGISTERDEVICE)?;
 
-    let _ = ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REGISTER_COINSTALLERS);
-    let _ = ffi::call_class_installer(*devinfo, &devinfo_data, DIF_INSTALLINTERFACES);
+    let _ = ffi::call_class_installer(*devinfo, devinfo_data, DIF_REGISTER_COINSTALLERS);
+    let _ = ffi::call_class_installer(*devinfo, devinfo_data, DIF_INSTALLINTERFACES);
 
-    ffi::call_class_installer(*devinfo, &devinfo_data, DIF_INSTALLDEVICE)?;
+    ffi::call_class_installer(*devinfo, devinfo_data, DIF_INSTALLDEVICE)?;
 
     let key = ffi::open_dev_reg_key(
         *devinfo,
-        &devinfo_data,
+        devinfo_data,
         DICS_FLAG_GLOBAL.0,
         0,
         DIREG_DRV,
@@ -131,17 +131,15 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
 /// Check if the given interface exists and is a valid network device
 pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
     let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
-    for devinfo_data in DeviceInfoIter::new(*devinfo) {
-        if let Ok(devinfo_data) = devinfo_data {
-            if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
-                if !hardware_id.eq_ignore_ascii_case(component_id) {
-                    continue;
-                }
-                if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
-                    if unsafe { luid.Value == luid2.Value } {
-                        // Found it!
-                        return Ok(());
-                    }
+    for devinfo_data in DeviceInfoIter::new(*devinfo).flatten() {
+        if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
+            if !hardware_id.eq_ignore_ascii_case(component_id) {
+                continue;
+            }
+            if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+                if unsafe { luid.Value == luid2.Value } {
+                    // Found it!
+                    return Ok(());
                 }
             }
         }
@@ -152,18 +150,16 @@ pub fn check_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()>
 /// Deletes an existing interface
 pub fn delete_interface(component_id: &str, luid: &NET_LUID_LH) -> io::Result<()> {
     let devinfo = ffi::get_class_devs(&GUID_NETWORK_ADAPTER, DIGCF_PRESENT)?;
-    for devinfo_data in DeviceInfoIter::new(*devinfo) {
-        if let Ok(devinfo_data) = devinfo_data {
-            if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
-                if !hardware_id.eq_ignore_ascii_case(component_id) {
-                    continue;
-                }
-                if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
-                    if unsafe { luid.Value == luid2.Value } {
-                        // Found it!
-                        ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REMOVE)?;
-                        return Ok(());
-                    }
+    for devinfo_data in DeviceInfoIter::new(*devinfo).flatten() {
+        if let Ok(hardware_id) = ffi::get_device_registry_property(*devinfo, &devinfo_data, SPDRP_HARDWAREID) {
+            if !hardware_id.eq_ignore_ascii_case(component_id) {
+                continue;
+            }
+            if let Ok(luid2) = get_luid(&devinfo, &devinfo_data) {
+                if unsafe { luid.Value == luid2.Value } {
+                    // Found it!
+                    ffi::call_class_installer(*devinfo, &devinfo_data, DIF_REMOVE)?;
+                    return Ok(());
                 }
             }
         }
