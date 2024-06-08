@@ -10,10 +10,13 @@ mod iface;
 mod netsh;
 
 use std::{io, net, time};
-use windows::Win32::{
-    Foundation::HANDLE,
-    NetworkManagement::Ndis::NET_LUID_LH,
-    System::Ioctl::{FILE_ANY_ACCESS, FILE_DEVICE_UNKNOWN, METHOD_BUFFERED},
+use windows::{
+    core::Owned,
+    Win32::{
+        Foundation::HANDLE,
+        NetworkManagement::Ndis::NET_LUID_LH,
+        System::Ioctl::{FILE_ANY_ACCESS, FILE_DEVICE_UNKNOWN, METHOD_BUFFERED},
+    },
 };
 
 /// tap-windows hardware ID
@@ -64,7 +67,7 @@ pub const HARDWARE_ID: &str = "tap0901";
 /// ```
 pub struct Device {
     luid: NET_LUID_LH,
-    handle: HANDLE,
+    handle: Owned<HANDLE>,
     component_id: String,
 }
 
@@ -149,9 +152,7 @@ impl Device {
     /// dev.delete().expect("Failed to delete device");
     /// ```
     pub fn delete(self) -> io::Result<()> {
-        iface::delete_interface(&self.component_id, &self.luid)?;
-
-        Ok(())
+        iface::delete_interface(&self.component_id, &self.luid)
     }
 
     /// Sets the status of the interface to connected.
@@ -169,21 +170,24 @@ impl Device {
     /// Retieve the mac of the interface
     pub fn get_mac(&self) -> io::Result<[u8; 6]> {
         let mut mac = [0; 6];
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MAC, &(), &mut mac).map(|_| mac)
+        ffi::device_io_control(*self.handle, TAP_IOCTL_GET_MAC, &(), &mut mac)?;
+        Ok(mac)
     }
 
     /// Retrieve the version of the driver
     pub fn get_version(&self) -> io::Result<[u64; 3]> {
         let in_version: [u64; 3] = [0; 3];
         let mut out_version: [u64; 3] = [0; 3];
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_VERSION, &in_version, &mut out_version).map(|_| out_version)
+        ffi::device_io_control(*self.handle, TAP_IOCTL_GET_VERSION, &in_version, &mut out_version)?;
+        Ok(out_version)
     }
 
     /// Retieve the mtu of the interface
     pub fn get_mtu(&self) -> io::Result<u32> {
         let in_mtu: u32 = 0;
         let mut out_mtu = 0;
-        ffi::device_io_control(self.handle, TAP_IOCTL_GET_MTU, &in_mtu, &mut out_mtu).map(|_| out_mtu)
+        ffi::device_io_control(*self.handle, TAP_IOCTL_GET_MTU, &in_mtu, &mut out_mtu)?;
+        Ok(out_mtu)
     }
 
     /// Retrieve the name of the interface
@@ -226,37 +230,31 @@ impl Device {
     pub fn set_status(&self, status: bool) -> io::Result<()> {
         let status: u32 = if status { 1 } else { 0 };
         let mut out_status: u32 = 0;
-        ffi::device_io_control(self.handle, TAP_IOCTL_SET_MEDIA_STATUS, &status, &mut out_status)
+        ffi::device_io_control(*self.handle, TAP_IOCTL_SET_MEDIA_STATUS, &status, &mut out_status)
     }
 
     pub fn read_non_mut(&self, buf: &mut [u8]) -> io::Result<usize> {
-        ffi::read_file(self.handle, buf)
+        ffi::read_file(*self.handle, buf)
     }
 
     pub fn write_non_mut(&self, buf: &[u8]) -> io::Result<usize> {
-        ffi::write_file(self.handle, buf)
+        ffi::write_file(*self.handle, buf)
     }
 }
 
 impl io::Read for Device {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        ffi::read_file(self.handle, buf)
+        ffi::read_file(*self.handle, buf)
     }
 }
 
 impl io::Write for Device {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        ffi::write_file(self.handle, buf)
+        ffi::write_file(*self.handle, buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-}
-
-impl Drop for Device {
-    fn drop(&mut self) {
-        let _ = ffi::close_handle(self.handle);
     }
 }
 

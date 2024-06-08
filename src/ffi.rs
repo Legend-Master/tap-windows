@@ -3,9 +3,9 @@
 
 //! Module holding safe wrappers over winapi functions
 
-use std::{ffi::c_void, fmt::Error, io, mem, ptr};
+use std::{ffi::c_void, fmt::Error, io, mem, ops::Deref, ptr};
 use windows::{
-    core::{GUID, HRESULT, PCWSTR},
+    core::{Owned, GUID, HRESULT, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             SetupDiBuildDriverInfoList, SetupDiCallClassInstaller, SetupDiClassNameFromGuidW,
@@ -13,7 +13,8 @@ use windows::{
             SetupDiDestroyDriverInfoList, SetupDiEnumDeviceInfo, SetupDiEnumDriverInfoW, SetupDiGetClassDevsW,
             SetupDiGetDeviceRegistryPropertyW, SetupDiGetDriverInfoDetailW, SetupDiOpenDevRegKey,
             SetupDiSetClassInstallParamsW, SetupDiSetDeviceRegistryPropertyW, SetupDiSetSelectedDevice,
-            SetupDiSetSelectedDriverW, HDEVINFO, MAX_CLASS_NAME_LEN, SETUP_DI_BUILD_DRIVER_DRIVER_TYPE,
+            SetupDiSetSelectedDriverW, DI_FUNCTION, HDEVINFO, MAX_CLASS_NAME_LEN, SETUP_DI_DEVICE_CREATION_FLAGS,
+            SETUP_DI_DRIVER_TYPE, SETUP_DI_GET_CLASS_DEVS_FLAGS, SETUP_DI_REGISTRY_PROPERTY, SP_CLASSINSTALL_HEADER,
             SP_DEVINFO_DATA, SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
         },
         Foundation::{
@@ -75,7 +76,7 @@ pub fn alias_to_luid(alias: &str) -> io::Result<NET_LUID_LH> {
     let alias = alias.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let mut luid = unsafe { mem::zeroed() };
     unsafe {
-        ConvertInterfaceAliasToLuid(PCWSTR(alias.as_ptr()), &mut luid)?;
+        ConvertInterfaceAliasToLuid(PCWSTR(alias.as_ptr()), &mut luid).ok()?;
     }
     Ok(luid)
 }
@@ -83,7 +84,7 @@ pub fn alias_to_luid(alias: &str) -> io::Result<NET_LUID_LH> {
 pub fn luid_to_index(luid: &NET_LUID_LH) -> io::Result<u32> {
     let mut index = 0;
     unsafe {
-        ConvertInterfaceLuidToIndex(luid, &mut index)?;
+        ConvertInterfaceLuidToIndex(luid, &mut index).ok()?;
     }
     Ok(index)
 }
@@ -91,7 +92,7 @@ pub fn luid_to_index(luid: &NET_LUID_LH) -> io::Result<u32> {
 pub fn luid_to_guid(luid: &NET_LUID_LH) -> io::Result<GUID> {
     let mut guid = unsafe { mem::zeroed() };
     unsafe {
-        ConvertInterfaceLuidToGuid(luid, &mut guid)?;
+        ConvertInterfaceLuidToGuid(luid, &mut guid).ok()?;
     }
     Ok(guid)
 }
@@ -100,7 +101,7 @@ pub fn luid_to_alias(luid: &NET_LUID_LH) -> io::Result<String> {
     unsafe {
         // IF_MAX_STRING_SIZE + 1
         let mut alias = vec![0; 257];
-        ConvertInterfaceLuidToAlias(luid, &mut alias)?;
+        ConvertInterfaceLuidToAlias(luid, &mut alias).ok()?;
 
         let alias = PCWSTR(alias.as_ptr())
             .to_string()
@@ -110,20 +111,13 @@ pub fn luid_to_alias(luid: &NET_LUID_LH) -> io::Result<String> {
     }
 }
 
-pub fn close_handle(handle: HANDLE) -> io::Result<()> {
-    unsafe {
-        CloseHandle(handle);
-    }
-    Ok(())
-}
-
 pub fn create_file(
     file_name: &str,
     desired_access: u32,
     share_mode: FILE_SHARE_MODE,
     creation_disposition: FILE_CREATION_DISPOSITION,
     flags_and_attributes: FILE_FLAGS_AND_ATTRIBUTES,
-) -> io::Result<HANDLE> {
+) -> io::Result<Owned<HANDLE>> {
     let file_name = file_name.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
     let handle = unsafe {
         CreateFileW(
@@ -136,43 +130,47 @@ pub fn create_file(
             None,
         )?
     };
-    Ok(handle)
+    Ok(unsafe { Owned::new(handle) })
 }
 
 pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
-    let mut ret = 0;
-    let mut overlapped = OVERLAPPED::default();
-    overlapped.hEvent = unsafe { CreateEventW(None, true, false, None) }?;
-    if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+    let mut bytes_read = 0;
+    let mut overlapped = OVERLAPPED {
+        hEvent: unsafe { CreateEventW(None, true, false, None) }?,
+        ..Default::default()
+    };
+    if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut bytes_read), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
         }
-        unsafe { GetOverlappedResult(handle, &mut overlapped, &mut ret, true) }?;
+        unsafe { GetOverlappedResult(handle, &overlapped, &mut bytes_read, true) }?;
     }
-    Ok(ret as _)
+    Ok(bytes_read as _)
 }
 
 pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
-    let mut ret = 0;
-    let mut overlapped = OVERLAPPED::default();
-    overlapped.hEvent = unsafe { CreateEventW(None, true, false, None) }?;
-    if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+    let mut bytes_written = 0;
+    let mut overlapped = OVERLAPPED {
+        hEvent: unsafe { CreateEventW(None, true, false, None) }?,
+        ..Default::default()
+    };
+    if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut bytes_written), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
         }
-        unsafe { GetOverlappedResult(handle, &mut overlapped, &mut ret, true) }?;
+        unsafe { GetOverlappedResult(handle, &overlapped, &mut bytes_written, true) }?;
     }
-    Ok(ret as _)
+    Ok(bytes_written as _)
 }
 
-pub fn create_device_info_list(guid: &GUID) -> io::Result<HDEVINFO> {
+pub fn create_device_info_list(guid: &GUID) -> io::Result<Owned<HDEVINFO>> {
     let devinfo = unsafe { SetupDiCreateDeviceInfoList(Some(guid), HWND::default())? };
-    Ok(devinfo)
+    Ok(unsafe { Owned::new(devinfo) })
 }
 
-pub fn get_class_devs(guid: &GUID, flags: u32) -> io::Result<HDEVINFO> {
+pub fn get_class_devs(guid: &GUID, flags: SETUP_DI_GET_CLASS_DEVS_FLAGS) -> io::Result<Owned<HDEVINFO>> {
     let devinfo = unsafe { SetupDiGetClassDevsW(Some(guid), PCWSTR::null(), HWND::default(), flags)? };
-    Ok(devinfo)
+    Ok(unsafe { Owned::new(devinfo) })
 }
 
 pub fn destroy_device_info_list(devinfo: HDEVINFO) -> io::Result<()> {
@@ -198,7 +196,7 @@ pub fn create_device_info(
     device_name: &str,
     guid: &GUID,
     device_description: &str,
-    creation_flags: u32,
+    creation_flags: SETUP_DI_DEVICE_CREATION_FLAGS,
 ) -> io::Result<SP_DEVINFO_DATA> {
     let mut devinfo_data: SP_DEVINFO_DATA = unsafe { mem::zeroed() };
     devinfo_data.cbSize = mem::size_of_val(&devinfo_data) as _;
@@ -220,15 +218,15 @@ pub fn create_device_info(
 
 pub fn set_selected_device(devinfo: HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<()> {
     unsafe {
-        SetupDiSetSelectedDevice(devinfo, devinfo_data as *const _ as _)?;
+        SetupDiSetSelectedDevice(devinfo, devinfo_data)?;
     }
     Ok(())
 }
 
 pub fn set_device_registry_property(
     devinfo: HDEVINFO,
-    devinfo_data: &SP_DEVINFO_DATA,
-    property: u32,
+    devinfo_data: &mut SP_DEVINFO_DATA,
+    property: SETUP_DI_REGISTRY_PROPERTY,
     value: Option<&str>,
 ) -> io::Result<()> {
     unsafe {
@@ -241,7 +239,7 @@ pub fn set_device_registry_property(
                 .flat_map(|&x| x.to_le_bytes().to_vec())
                 .collect::<Vec<u8>>()
         });
-        SetupDiSetDeviceRegistryPropertyW(devinfo, devinfo_data as *const _ as _, property, value.as_deref())?;
+        SetupDiSetDeviceRegistryPropertyW(devinfo, devinfo_data, property, value.as_deref())?;
     }
     Ok(())
 }
@@ -249,19 +247,12 @@ pub fn set_device_registry_property(
 pub fn get_device_registry_property(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    property: u32,
+    property: SETUP_DI_REGISTRY_PROPERTY,
 ) -> io::Result<String> {
     unsafe {
         let mut requiredsize = 0;
 
-        let r = SetupDiGetDeviceRegistryPropertyW(
-            devinfo,
-            devinfo_data as *const _ as _,
-            property,
-            None,
-            None,
-            Some(&mut requiredsize),
-        );
+        let r = SetupDiGetDeviceRegistryPropertyW(devinfo, devinfo_data, property, None, None, Some(&mut requiredsize));
         if let Err(e) = r {
             if e.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult() {
                 return Err(e.into());
@@ -291,21 +282,21 @@ pub fn get_device_registry_property(
 pub fn build_driver_info_list(
     devinfo: HDEVINFO,
     devinfo_data: &mut SP_DEVINFO_DATA,
-    driver_type: u32,
+    driver_type: SETUP_DI_DRIVER_TYPE,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiBuildDriverInfoList(
-            devinfo,
-            Some(devinfo_data as &mut _),
-            SETUP_DI_BUILD_DRIVER_DRIVER_TYPE(driver_type),
-        )?;
+        SetupDiBuildDriverInfoList(devinfo, Some(devinfo_data), driver_type)?;
     }
     Ok(())
 }
 
-pub fn destroy_driver_info_list(devinfo: HDEVINFO, devinfo_data: &SP_DEVINFO_DATA, driver_type: u32) -> io::Result<()> {
+pub fn destroy_driver_info_list(
+    devinfo: HDEVINFO,
+    devinfo_data: &SP_DEVINFO_DATA,
+    driver_type: SETUP_DI_DRIVER_TYPE,
+) -> io::Result<()> {
     unsafe {
-        SetupDiDestroyDriverInfoList(devinfo, Some(devinfo_data as *const _ as _), driver_type)?;
+        SetupDiDestroyDriverInfoList(devinfo, Some(devinfo_data), driver_type)?;
     }
     Ok(())
 }
@@ -321,8 +312,8 @@ pub fn get_driver_info_detail(
     unsafe {
         SetupDiGetDriverInfoDetailW(
             devinfo,
-            Some(devinfo_data as *const _ as _),
-            drvinfo_data as *const _ as _,
+            Some(devinfo_data),
+            drvinfo_data,
             Some(&mut drvinfo_detail as *mut _ as _),
             mem::size_of_val(&drvinfo_detail) as _,
             None,
@@ -333,15 +324,11 @@ pub fn get_driver_info_detail(
 
 pub fn set_selected_driver(
     devinfo: HDEVINFO,
-    devinfo_data: &SP_DEVINFO_DATA,
-    drvinfo_data: &SP_DRVINFO_DATA_V2_W,
+    devinfo_data: &mut SP_DEVINFO_DATA,
+    drvinfo_data: &mut SP_DRVINFO_DATA_V2_W,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiSetSelectedDriverW(
-            devinfo,
-            Some(devinfo_data as *const _ as _),
-            Some(drvinfo_data as *const _ as _),
-        )?;
+        SetupDiSetSelectedDriverW(devinfo, Some(devinfo_data), Some(drvinfo_data))?;
     }
     Ok(())
 }
@@ -349,15 +336,10 @@ pub fn set_selected_driver(
 pub fn set_class_install_params(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    params: &impl Copy,
+    params: &SP_CLASSINSTALL_HEADER,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiSetClassInstallParamsW(
-            devinfo,
-            Some(devinfo_data as *const _ as _),
-            Some(params as *const _ as _),
-            mem::size_of_val(params) as _,
-        )?;
+        SetupDiSetClassInstallParamsW(devinfo, Some(devinfo_data), Some(params), mem::size_of_val(params) as _)?;
     }
     Ok(())
 }
@@ -365,10 +347,10 @@ pub fn set_class_install_params(
 pub fn call_class_installer(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    install_function: u32,
+    install_function: DI_FUNCTION,
 ) -> io::Result<()> {
     unsafe {
-        SetupDiCallClassInstaller(install_function, devinfo, Some(devinfo_data as *const _ as _))?;
+        SetupDiCallClassInstaller(install_function, devinfo, Some(devinfo_data))?;
     }
     Ok(())
 }
@@ -380,18 +362,9 @@ pub fn open_dev_reg_key(
     hw_profile: u32,
     key_type: u32,
     sam_desired: u32,
-) -> io::Result<HKEY> {
-    let key = unsafe {
-        SetupDiOpenDevRegKey(
-            devinfo,
-            devinfo_data as *const _ as _,
-            scope,
-            hw_profile,
-            key_type,
-            sam_desired,
-        )?
-    };
-    Ok(key)
+) -> io::Result<windows_registry::Key> {
+    let key = unsafe { SetupDiOpenDevRegKey(devinfo, devinfo_data, scope, hw_profile, key_type, sam_desired)? };
+    Ok(unsafe { windows_registry::Key::from_raw(key.0) })
 }
 
 pub fn notify_change_key_value(
@@ -402,7 +375,7 @@ pub fn notify_change_key_value(
 ) -> io::Result<()> {
     unsafe {
         let event = CreateEventW(None, FALSE, FALSE, None)?;
-        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), event, TRUE)?;
+        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), event, TRUE).ok()?;
         match WaitForSingleObject(event, milliseconds) {
             WAIT_OBJECT_0 => Ok(()),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "Registry timed out")),
@@ -414,7 +387,7 @@ pub fn notify_change_key_value(
 pub fn enum_driver_info(
     devinfo: HDEVINFO,
     devinfo_data: &SP_DEVINFO_DATA,
-    driver_type: u32,
+    driver_type: SETUP_DI_DRIVER_TYPE,
     member_index: u32,
 ) -> Option<io::Result<SP_DRVINFO_DATA_V2_W>> {
     let mut drvinfo_data: SP_DRVINFO_DATA_V2_W = unsafe { mem::zeroed() };
@@ -423,7 +396,7 @@ pub fn enum_driver_info(
     let result = unsafe {
         SetupDiEnumDriverInfoW(
             devinfo,
-            Some(devinfo_data as *const _ as _),
+            Some(devinfo_data),
             driver_type,
             member_index,
             &mut drvinfo_data,
@@ -432,7 +405,7 @@ pub fn enum_driver_info(
     match result {
         Ok(_) => Some(Ok(drvinfo_data)),
         Err(e) => {
-            if e.code() == HRESULT::from(ERROR_NO_MORE_ITEMS) {
+            if e.code() == ERROR_NO_MORE_ITEMS.into() {
                 None
             } else {
                 Some(Err(e.into()))
@@ -448,7 +421,7 @@ pub fn enum_device_info(devinfo: HDEVINFO, member_index: u32) -> Option<io::Resu
     match unsafe { SetupDiEnumDeviceInfo(devinfo, member_index, &mut devinfo_data) } {
         Ok(_) => Some(Ok(devinfo_data)),
         Err(e) => {
-            if e.code() == HRESULT::from(ERROR_NO_MORE_ITEMS) {
+            if e.code() == ERROR_NO_MORE_ITEMS.into() {
                 None
             } else {
                 Some(Err(e.into()))
@@ -477,4 +450,25 @@ pub fn device_io_control(
         )?;
     }
     Ok(())
+}
+
+pub struct DeviceInfoIter {
+    handle: HDEVINFO,
+    current: u32,
+}
+
+impl DeviceInfoIter {
+    pub fn new(handle: HDEVINFO) -> Self {
+        Self { handle, current: 0 }
+    }
+}
+
+impl Iterator for DeviceInfoIter {
+    type Item = io::Result<SP_DEVINFO_DATA>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = enum_device_info(self.handle, self.current);
+        self.current += 1;
+        result
+    }
 }
