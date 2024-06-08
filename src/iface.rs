@@ -117,12 +117,12 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
         DIREG_DRV,
         KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
     )?;
-    let key = windows_registry::Key(key.0);
+    let key = unsafe { windows_registry::Key::from_raw(key.0) };
     let luid = loop {
         if let Ok(luid) = get_luid_from_key(&key) {
             break luid;
         } else {
-            ffi::notify_change_key_value(HKEY(key.raw_handle()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
+            ffi::notify_change_key_value(HKEY(key.as_raw()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
         }
     };
     Ok(luid)
@@ -187,17 +187,19 @@ pub fn open_interface(luid: &NET_LUID_LH) -> io::Result<HANDLE> {
 }
 
 fn get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DATA) -> io::Result<NET_LUID_LH> {
-    let key = windows_registry::Key(
-        ffi::open_dev_reg_key(
-            *devinfo,
-            devinfo_data,
-            DICS_FLAG_GLOBAL.0,
-            0,
-            DIREG_DRV,
-            KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
-        )?
-        .0,
-    );
+    let key = unsafe {
+        windows_registry::Key::from_raw(
+            ffi::open_dev_reg_key(
+                *devinfo,
+                devinfo_data,
+                DICS_FLAG_GLOBAL.0,
+                0,
+                DIREG_DRV,
+                KEY_QUERY_VALUE.0 | KEY_NOTIFY.0,
+            )?
+            .0,
+        )
+    };
     get_luid_from_key(&key)
 }
 
