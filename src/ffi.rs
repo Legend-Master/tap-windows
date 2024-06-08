@@ -134,33 +134,33 @@ pub fn create_file(
 }
 
 pub fn read_file(handle: HANDLE, buffer: &mut [u8]) -> io::Result<usize> {
-    let mut ret = 0;
+    let mut bytes_read = 0;
     let mut overlapped = OVERLAPPED {
         hEvent: unsafe { CreateEventW(None, true, false, None) }?,
         ..Default::default()
     };
-    if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+    if let Err(error) = unsafe { ReadFile(handle, Some(buffer), Some(&mut bytes_read), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
         }
-        unsafe { GetOverlappedResult(handle, &overlapped, &mut ret, true) }?;
+        unsafe { GetOverlappedResult(handle, &overlapped, &mut bytes_read, true) }?;
     }
-    Ok(ret as _)
+    Ok(bytes_read as _)
 }
 
 pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
-    let mut ret = 0;
+    let mut bytes_written = 0;
     let mut overlapped = OVERLAPPED {
         hEvent: unsafe { CreateEventW(None, true, false, None) }?,
         ..Default::default()
     };
-    if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut ret), Some(&mut overlapped)) } {
+    if let Err(error) = unsafe { WriteFile(handle, Some(buffer), Some(&mut bytes_written), Some(&mut overlapped)) } {
         if error != ERROR_IO_PENDING.into() {
             return Err(error.into());
         }
-        unsafe { GetOverlappedResult(handle, &overlapped, &mut ret, true) }?;
+        unsafe { GetOverlappedResult(handle, &overlapped, &mut bytes_written, true) }?;
     }
-    Ok(ret as _)
+    Ok(bytes_written as _)
 }
 
 pub fn create_device_info_list(guid: &GUID) -> io::Result<Owned<HDEVINFO>> {
