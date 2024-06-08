@@ -70,9 +70,8 @@ fn find_and_install_driver(
             continue;
         }
 
-        let drvinfo_detail = match ffi::get_driver_info_detail(devinfo, devinfo_data, &drvinfo_data) {
-            Ok(drvinfo_detail) => drvinfo_detail,
-            _ => continue,
+        let Ok(drvinfo_detail) = ffi::get_driver_info_detail(devinfo, devinfo_data, &drvinfo_data) else {
+            continue;
         };
 
         let hardware_id = unsafe {
