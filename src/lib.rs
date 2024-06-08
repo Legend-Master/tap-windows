@@ -152,9 +152,7 @@ impl Device {
     /// dev.delete().expect("Failed to delete device");
     /// ```
     pub fn delete(self) -> io::Result<()> {
-        iface::delete_interface(&self.component_id, &self.luid)?;
-
-        Ok(())
+        iface::delete_interface(&self.component_id, &self.luid)
     }
 
     /// Sets the status of the interface to connected.
