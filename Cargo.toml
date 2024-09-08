@@ -12,9 +12,9 @@ keywords = ["tap", "tunnel", "bindings", "network"]
 readme = "README.md"
 
 [dependencies]
-c2rust-bitfields = "0.18"
+c2rust-bitfields = "0.19"
 log = "0.4"
-windows = { version = "0.57", features = [
+windows = { version = "0.58", features = [
     "Win32_System_SystemInformation",
     "Win32_Networking_WinSock",
     "Win32_System_Memory",
@@ -30,12 +30,12 @@ windows = { version = "0.57", features = [
     "Win32_System_Registry",
     "Win32_System_Ioctl",
 ] }
-windows-registry = "0.1.2"
+windows-registry = "0.2"
 
 [dev-dependencies]
 ctrlc2 = { version = "3.5", features = ["termination"] }
 dotenvy = "0.15"
-env_logger = "0.10"
+env_logger = "0.11"
 
 [package.metadata.docs.rs]
 targets = [

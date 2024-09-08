@@ -71,6 +71,9 @@ pub struct Device {
     component_id: String,
 }
 
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
+
 impl Device {
     /// Creates a new tap-windows device
     ///
