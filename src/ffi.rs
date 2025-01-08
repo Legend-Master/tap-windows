@@ -3,9 +3,9 @@
 
 //! Module holding safe wrappers over winapi functions
 
-use std::{ffi::c_void, fmt::Error, io, mem, ops::Deref, ptr};
+use std::{io, mem};
 use windows::{
-    core::{Owned, GUID, HRESULT, PCWSTR},
+    core::{Owned, GUID, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             SetupDiBuildDriverInfoList, SetupDiCallClassInstaller, SetupDiClassNameFromGuidW,
@@ -18,8 +18,8 @@ use windows::{
             SP_DEVINFO_DATA, SP_DRVINFO_DATA_V2_W, SP_DRVINFO_DETAIL_DATA_W,
         },
         Foundation::{
-            CloseHandle, GetLastError, BOOL, ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_NO_MORE_ITEMS, FALSE,
-            FILETIME, HANDLE, HWND, TRUE, WAIT_EVENT, WAIT_OBJECT_0, WAIT_TIMEOUT, WIN32_ERROR,
+            ERROR_INSUFFICIENT_BUFFER, ERROR_IO_PENDING, ERROR_NO_MORE_ITEMS, FILETIME, HANDLE, WAIT_OBJECT_0,
+            WAIT_TIMEOUT,
         },
         NetworkManagement::{
             IpHelper::{
@@ -164,12 +164,12 @@ pub fn write_file(handle: HANDLE, buffer: &[u8]) -> io::Result<usize> {
 }
 
 pub fn create_device_info_list(guid: &GUID) -> io::Result<Owned<HDEVINFO>> {
-    let devinfo = unsafe { SetupDiCreateDeviceInfoList(Some(guid), HWND::default())? };
+    let devinfo = unsafe { SetupDiCreateDeviceInfoList(Some(guid), None)? };
     Ok(unsafe { Owned::new(devinfo) })
 }
 
 pub fn get_class_devs(guid: &GUID, flags: SETUP_DI_GET_CLASS_DEVS_FLAGS) -> io::Result<Owned<HDEVINFO>> {
-    let devinfo = unsafe { SetupDiGetClassDevsW(Some(guid), PCWSTR::null(), HWND::default(), flags)? };
+    let devinfo = unsafe { SetupDiGetClassDevsW(Some(guid), PCWSTR::null(), None, flags)? };
     Ok(unsafe { Owned::new(devinfo) })
 }
 
@@ -208,7 +208,7 @@ pub fn create_device_info(
             PCWSTR(device_name.as_ptr()),
             guid,
             PCWSTR(device_description.as_ptr()),
-            HWND::default(),
+            None,
             creation_flags,
             Some(&mut devinfo_data),
         )?;
@@ -369,13 +369,13 @@ pub fn open_dev_reg_key(
 
 pub fn notify_change_key_value(
     key: HKEY,
-    watch_subtree: BOOL,
+    watch_subtree: bool,
     notify_filter: u32,
     milliseconds: u32,
 ) -> io::Result<()> {
     unsafe {
-        let event = CreateEventW(None, FALSE, FALSE, None)?;
-        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), event, TRUE).ok()?;
+        let event = CreateEventW(None, false, false, None)?;
+        RegNotifyChangeKeyValue(key, watch_subtree, REG_NOTIFY_FILTER(notify_filter), Some(event), true).ok()?;
         match WaitForSingleObject(event, milliseconds) {
             WAIT_OBJECT_0 => Ok(()),
             WAIT_TIMEOUT => Err(io::Error::new(io::ErrorKind::TimedOut, "Registry timed out")),

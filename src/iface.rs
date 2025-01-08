@@ -8,7 +8,7 @@ use windows::{
             DIF_REGISTER_COINSTALLERS, DIF_REMOVE, DIGCF_PRESENT, DIREG_DRV, HDEVINFO, SPDIT_COMPATDRIVER,
             SPDRP_HARDWAREID, SP_DEVINFO_DATA,
         },
-        Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE},
+        Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
         NetworkManagement::Ndis::NET_LUID_LH,
         Storage::FileSystem::{
             FILE_ATTRIBUTE_SYSTEM, FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -121,7 +121,7 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
         if let Ok(luid) = get_luid_from_key(&key) {
             break luid;
         } else {
-            ffi::notify_change_key_value(HKEY(key.as_raw()), TRUE, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
+            ffi::notify_change_key_value(HKEY(key.as_raw()), true, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
         }
     };
     Ok(luid)
