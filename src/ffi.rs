@@ -66,7 +66,7 @@ pub fn string_from_guid(guid: &GUID) -> io::Result<String> {
 
         let string = PCWSTR(string.as_ptr())
             .to_string()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(string)
     }
@@ -105,7 +105,7 @@ pub fn luid_to_alias(luid: &NET_LUID_LH) -> io::Result<String> {
 
         let alias = PCWSTR(alias.as_ptr())
             .to_string()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(alias)
     }
@@ -186,7 +186,7 @@ pub fn class_name_from_guid(guid: &GUID) -> io::Result<String> {
         SetupDiClassNameFromGuidW(guid, &mut class_name, None)?;
         let class_name = PCWSTR(class_name.as_ptr())
             .to_string()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
         Ok(class_name)
     }
 }
@@ -271,9 +271,7 @@ pub fn get_device_registry_property(
         )?;
 
         let value = value.as_ptr() as *const u16;
-        let value = PCWSTR(value)
-            .to_string()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        let value = PCWSTR(value).to_string().map_err(|e| io::Error::other(e.to_string()))?;
 
         Ok(value)
     }

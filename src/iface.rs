@@ -77,7 +77,7 @@ fn find_and_install_driver(
         let hardware_id = unsafe {
             PCWSTR(drvinfo_detail.HardwareID.as_ptr())
                 .to_string()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+                .map_err(|e| io::Error::other(e.to_string()))?
         };
         if !hardware_id.eq_ignore_ascii_case(component_id) {
             continue;

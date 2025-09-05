@@ -10,7 +10,7 @@ fn exec_netsh(args: &[&str]) -> io::Result<()> {
             if res.success() {
                 Ok(())
             } else {
-                Err(io::Error::new(io::ErrorKind::Other, "Failed to execute netsh"))
+                Err(io::Error::other("Failed to execute netsh"))
             }
         })
 }
