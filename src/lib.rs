@@ -126,7 +126,7 @@ impl Device {
     /// println!("{:?}", dev.get_name());
     /// ```
     pub fn open(component_id: &str, name: &str) -> io::Result<Self> {
-        let luid = ffi::alias_to_luid(name)?;
+        let luid = ffi::alias_to_luid(name).map_err(|_| io::ErrorKind::NotFound)?;
         iface::check_interface(component_id, &luid)?;
 
         let handle = iface::open_interface(&luid)?;
