@@ -221,11 +221,7 @@ impl Device {
         A: Into<net::Ipv4Addr>,
         B: Into<net::Ipv4Addr>,
     {
-        let name = self.get_name()?;
-        let address = address.into().to_string();
-        let mask = mask.into().to_string();
-
-        netsh::set_interface_ip(&name, &address, &mask)
+        iface::set_interface_ipv4_luid(self.luid, address.into(), mask.into())
     }
 
     /// Set the status of the interface, true for connected,

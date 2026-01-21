@@ -1,7 +1,7 @@
 use crate::ffi::{self, DeviceInfoIter};
-use std::io;
+use std::{ffi::CString, io, net::Ipv4Addr};
 use windows::{
-    core::{Owned, GUID, PCWSTR},
+    core::{Owned, GUID, PCSTR, PCWSTR},
     Win32::{
         Devices::DeviceAndDriverInstallation::{
             DICD_GENERATE_ID, DICS_FLAG_GLOBAL, DIF_INSTALLDEVICE, DIF_INSTALLINTERFACES, DIF_REGISTERDEVICE,
@@ -9,7 +9,14 @@ use windows::{
             SPDRP_HARDWAREID, SP_DEVINFO_DATA,
         },
         Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
-        NetworkManagement::Ndis::NET_LUID_LH,
+        NetworkManagement::{
+            IpHelper::{
+                CreateUnicastIpAddressEntry, DeleteUnicastIpAddressEntry, FreeMibTable, GetUnicastIpAddressTable,
+                InitializeUnicastIpAddressEntry, MIB_UNICASTIPADDRESS_ROW,
+            },
+            Ndis::NET_LUID_LH,
+        },
+        Networking::WinSock::{inet_addr, AF_INET, INADDR_NONE, IN_ADDR, IN_ADDR_0, SOCKADDR_IN},
         Storage::FileSystem::{
             FILE_ATTRIBUTE_SYSTEM, FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
         },
@@ -204,4 +211,56 @@ fn get_luid_from_key(key: &windows_registry::Key) -> io::Result<NET_LUID_LH> {
         (*luid2).set_NetLuidIndex(luid_index as _);
     }
     Ok(luid2)
+}
+
+pub fn set_interface_ipv4_luid(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_mask: Ipv4Addr) -> io::Result<()> {
+    let _ = clear_ipv4_addresses_luid(luid);
+
+    let mut row = MIB_UNICASTIPADDRESS_ROW::default();
+    unsafe { InitializeUnicastIpAddressEntry(&mut row) };
+
+    let address_h_string = CString::new(ip_address.to_string()).expect("An Ipv4Addr is always a valid CString");
+    let s_addr = unsafe { inet_addr(PCSTR::from_raw(address_h_string.as_ptr() as _)) };
+    if s_addr == INADDR_NONE {
+        return Err(io::Error::other(format!("The ip_address {ip_address} is invalid")));
+    }
+    let ipv4_address = SOCKADDR_IN {
+        sin_family: AF_INET,
+        sin_addr: IN_ADDR {
+            S_un: IN_ADDR_0 { S_addr: s_addr },
+        },
+        ..Default::default()
+    };
+
+    row.InterfaceLuid = luid;
+    row.Address.Ipv4 = ipv4_address;
+    row.OnLinkPrefixLength = u32::from_be_bytes(ip_mask.octets()).leading_ones() as u8;
+
+    let result = unsafe { CreateUnicastIpAddressEntry(&row) };
+    if result.is_err() {
+        Err(windows::core::Error::from(result).into())
+    } else {
+        Ok(())
+    }
+}
+
+fn clear_ipv4_addresses_luid(luid: NET_LUID_LH) -> io::Result<()> {
+    let mut table = std::ptr::null_mut();
+    let status = unsafe { GetUnicastIpAddressTable(AF_INET, &mut table) };
+
+    if status.is_err() {
+        return Err(io::Error::new(io::ErrorKind::Other, "GetUnicastIpAddressTable failed"));
+    }
+
+    let entries = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize) };
+
+    for entry in entries {
+        if unsafe { entry.InterfaceLuid.Value == luid.Value } {
+            let _ = unsafe { DeleteUnicastIpAddressEntry(entry) };
+        }
+    }
+
+    unsafe { FreeMibTable(table as _) };
+
+    Ok(())
 }
