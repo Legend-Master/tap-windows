@@ -213,8 +213,8 @@ fn get_luid_from_key(key: &windows_registry::Key) -> io::Result<NET_LUID_LH> {
     Ok(luid2)
 }
 
-pub fn set_interface_ipv4_luid(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_mask: Ipv4Addr) -> io::Result<()> {
-    let _ = clear_ipv4_addresses_luid(luid);
+pub fn set_interface_ipv4_address(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_mask: Ipv4Addr) -> io::Result<()> {
+    let _ = clear_ipv4_addresses(luid);
 
     let mut row = MIB_UNICASTIPADDRESS_ROW::default();
     unsafe { InitializeUnicastIpAddressEntry(&mut row) };
@@ -244,12 +244,12 @@ pub fn set_interface_ipv4_luid(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_mask:
     }
 }
 
-fn clear_ipv4_addresses_luid(luid: NET_LUID_LH) -> io::Result<()> {
+fn clear_ipv4_addresses(luid: NET_LUID_LH) -> io::Result<()> {
     let mut table = std::ptr::null_mut();
     let status = unsafe { GetUnicastIpAddressTable(AF_INET, &mut table) };
 
     if status.is_err() {
-        return Err(io::Error::new(io::ErrorKind::Other, "GetUnicastIpAddressTable failed"));
+        return Err(io::Error::other("GetUnicastIpAddressTable failed"));
     }
 
     let entries = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize) };

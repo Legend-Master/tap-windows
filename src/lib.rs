@@ -221,7 +221,7 @@ impl Device {
         A: Into<net::Ipv4Addr>,
         B: Into<net::Ipv4Addr>,
     {
-        iface::set_interface_ipv4_luid(self.luid, address.into(), mask.into())
+        iface::set_interface_ipv4_address(self.luid, address.into(), mask.into())
     }
 
     /// Set the status of the interface, true for connected,
