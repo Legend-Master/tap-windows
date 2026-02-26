@@ -214,7 +214,7 @@ fn get_luid_from_key(key: &windows_registry::Key) -> io::Result<NET_LUID_LH> {
 }
 
 pub fn set_interface_ipv4_address(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_mask: Ipv4Addr) -> io::Result<()> {
-    let _ = clear_ipv4_addresses(luid);
+    let _ = clear_ipv4_addresses(&luid);
 
     let mut row = MIB_UNICASTIPADDRESS_ROW::default();
     unsafe { InitializeUnicastIpAddressEntry(&mut row) };
@@ -240,11 +240,14 @@ pub fn set_interface_ipv4_address(luid: NET_LUID_LH, ip_address: Ipv4Addr, ip_ma
     if result.is_err() {
         Err(windows::core::Error::from(result).into())
     } else {
+        if let Err(error) = disable_dhcp(&luid) {
+            log::warn!("Failed to disable DHCP for the TAP device, you might need the network identification to complete to use things like `Set-NetConnectionProfile`: {error}")
+        };
         Ok(())
     }
 }
 
-fn clear_ipv4_addresses(luid: NET_LUID_LH) -> io::Result<()> {
+fn clear_ipv4_addresses(luid: &NET_LUID_LH) -> io::Result<()> {
     let mut table = std::ptr::null_mut();
     let status = unsafe { GetUnicastIpAddressTable(AF_INET, &mut table) };
 
@@ -262,5 +265,18 @@ fn clear_ipv4_addresses(luid: NET_LUID_LH) -> io::Result<()> {
 
     unsafe { FreeMibTable(table as _) };
 
+    Ok(())
+}
+
+fn disable_dhcp(luid: &NET_LUID_LH) -> io::Result<()> {
+    let guid = ffi::luid_to_guid(luid)?;
+    let guid = ffi::string_from_guid(&guid)?;
+    windows_registry::LOCAL_MACHINE
+        .options()
+        .write()
+        .open(format!(
+            r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{guid}"
+        ))?
+        .set_u32("EnableDHCP", 0)?;
     Ok(())
 }

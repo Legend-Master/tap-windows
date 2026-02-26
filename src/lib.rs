@@ -204,7 +204,9 @@ impl Device {
         netsh::set_interface_name(&name, newname)
     }
 
-    /// Set the ip of the interface
+    /// Set the ip of the interface,
+    /// this will also disable the DHCP for this interface
+    ///
     /// ```no_run
     /// use tap_windows::{Device, HARDWARE_ID};
     ///
