@@ -32,11 +32,6 @@ windows = { version = "0.62", features = [
 ] }
 windows-registry = "0.6"
 
-[dev-dependencies]
-ctrlc2 = { version = "3.5", features = ["termination"] }
-dotenvy = "0.15"
-env_logger = "0.11"
-
 [package.metadata.docs.rs]
 targets = [
     "x86_64-pc-windows-msvc",
