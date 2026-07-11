@@ -1,5 +1,9 @@
 use crate::ffi::{self, DeviceInfoIter};
-use std::{ffi::CString, io, net::Ipv4Addr};
+use std::{
+    ffi::CString,
+    io::{self},
+    net::Ipv4Addr,
+};
 use windows::{
     core::{Owned, GUID, PCSTR, PCWSTR},
     Win32::{
@@ -127,8 +131,15 @@ fn install_device_and_get_luid(devinfo: &HDEVINFO, devinfo_data: &SP_DEVINFO_DAT
     let luid = loop {
         if let Ok(luid) = get_luid_from_key(&key) {
             break luid;
-        } else {
-            ffi::notify_change_key_value(HKEY(key.as_raw()), true, REG_NOTIFY_CHANGE_NAME.0, 2000)?;
+        };
+        if let Err(error) = ffi::notify_change_key_value(HKEY(key.as_raw()), true, REG_NOTIFY_CHANGE_NAME.0, 2000) {
+            if error.kind() == io::ErrorKind::TimedOut {
+                // In case the key was added between the last `get_luid_from_key` call and `notify_change_key_value` call
+                if let Ok(luid) = get_luid_from_key(&key) {
+                    break luid;
+                };
+            }
+            return Err(error);
         }
     };
     Ok(luid)
