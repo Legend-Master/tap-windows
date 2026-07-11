@@ -12,7 +12,7 @@ keywords = ["tap", "tunnel", "bindings", "network"]
 readme = "README.md"
 
 [dependencies]
-c2rust-bitfields = "0.19"
+c2rust-bitfields = "0.22.1"
 log = "0.4"
 windows = { version = "0.62", features = [
     "Win32_System_SystemInformation",
