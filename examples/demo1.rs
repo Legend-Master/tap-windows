@@ -1,16 +1,13 @@
-use std::io::Read;
+use std::io::{self, Read};
 use tap_windows::{Device, HARDWARE_ID};
-use windows::{
-    core::HRESULT,
-    Win32::Foundation::{ERROR_GEN_FAILURE, ERROR_INVALID_PARAMETER},
-};
+use windows::{core::HRESULT, Win32::Foundation::ERROR_GEN_FAILURE};
 
 const MY_INTERFACE: &str = "MyInterface";
 
 fn main() -> std::io::Result<()> {
     let mut dev = Device::open(HARDWARE_ID, MY_INTERFACE);
     if let Err(e) = dev {
-        if e.raw_os_error() == Some(HRESULT::from(ERROR_INVALID_PARAMETER).0) {
+        if e.kind() == io::ErrorKind::NotFound {
             println!("Device is not exist, try creating a new one");
             let new_dev = Device::create(HARDWARE_ID)?;
             new_dev.set_name(MY_INTERFACE)?;
